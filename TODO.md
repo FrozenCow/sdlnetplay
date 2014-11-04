@@ -8,4 +8,4 @@
 * Gamepad
 * Mouse
 * Desync detection (hashing draw calls)
-
+* Multiple people
