@@ -83,33 +83,69 @@ typedef struct {
     uint16_t unicode;
 } KeySym;
 
+
 typedef struct {
     uint8_t type;
     uint8_t state;
     KeySym keysym;
 } KeyboardEvent;
 
-typedef darray(KeyboardEvent) darray_event;
+typedef union {
+	uint8_t type;
+	SDL_MouseMotionEvent motion;
+	SDL_MouseButtonEvent button;
+	KeyboardEvent key;
+} NPEvent;
 
-SDL_Event toSDLEvent(const KeyboardEvent *event) {
+typedef darray(NPEvent) darray_event;
+
+SDL_Event toSDLEvent(const NPEvent *event) {
     SDL_Event result;
     result.type = event->type;
-    result.key.state = event->state;
-    result.key.keysym.scancode = event->keysym.scancode;
-    result.key.keysym.sym = event->keysym.sym;
-    result.key.keysym.mod = event->keysym.mod;
-    result.key.keysym.unicode = event->keysym.unicode;
+	switch(event->type) {
+	case SDL_KEYUP:
+	case SDL_KEYDOWN:
+		result.key.state = event->key.state;
+		result.key.keysym.scancode = event->key.keysym.scancode;
+		result.key.keysym.sym = event->key.keysym.sym;
+		result.key.keysym.mod = event->key.keysym.mod;
+		result.key.keysym.unicode = event->key.keysym.unicode;
+		break;
+	case SDL_MOUSEMOTION:
+		result.motion = event->motion;
+		break;
+	case SDL_MOUSEBUTTONDOWN:
+	case SDL_MOUSEBUTTONUP:
+		result.button = event->button;
+		break;
+	default:
+		break;
+	}
     return result;
 }
 
-KeyboardEvent fromSDLEvent(const SDL_Event *event) {
-    KeyboardEvent result;
+NPEvent fromSDLEvent(const SDL_Event *event) {
+    NPEvent result;
     result.type = event->type;
-    result.state = event->key.state;
-    result.keysym.scancode = event->key.keysym.scancode;
-    result.keysym.sym = event->key.keysym.sym;
-    result.keysym.mod = event->key.keysym.mod;
-    result.keysym.unicode = event->key.keysym.unicode;
+	switch(event->type) {
+		case SDL_KEYUP:
+		case SDL_KEYDOWN:
+			result.key.state = event->key.state;
+			result.key.keysym.scancode = event->key.keysym.scancode;
+			result.key.keysym.sym = event->key.keysym.sym;
+			result.key.keysym.mod = event->key.keysym.mod;
+			result.key.keysym.unicode = event->key.keysym.unicode;
+			break;
+		case SDL_MOUSEMOTION:
+			result.motion = event->motion;
+			break;
+		case SDL_MOUSEBUTTONDOWN:
+		case SDL_MOUSEBUTTONUP:
+			result.button = event->button;
+			break;
+		default:
+			break;
+	}
     return result;
 }
 
@@ -216,7 +252,7 @@ Uint8 *SDL_GetKeyState(int *numkeys) {
 }
 
 int SDL_Init(Uint32 flags) {
-    fprintf(stdout, "sizeof(KeyboardEvent) = %u\n", (uint32_t)sizeof(KeyboardEvent));
+    fprintf(stdout, "sizeof(NPEvent) = %u\n", (uint32_t)sizeof(NPEvent));
     fprintf(stdout, "sizeof(SDL_Event) = %u\n", (uint32_t)sizeof(SDL_Event));
     fflush(stdout);
 
@@ -241,7 +277,15 @@ int SDL_Init(Uint32 flags) {
 }
 
 void printEvent(SDL_Event *event) {
-    fprintf(stdout, "%d: %x > %s\n", framenumber, event->type, SDL_GetKeyName(event->key.keysym.sym));
+	switch(event->type) {
+	case SDL_KEYDOWN:
+	case SDL_KEYUP:
+		fprintf(stdout, "%d: %x > %s\n", framenumber, event->type, SDL_GetKeyName(event->key.keysym.sym));
+		break;
+	default:
+		fprintf(stdout, "\n");
+		break;
+	}
 }
 
 int SDL_PollEvent(SDL_Event *event) {
@@ -265,8 +309,8 @@ int SDL_PollEvent(SDL_Event *event) {
     }
 }
 
-void write_event(int fd, KeyboardEvent *event) {
-    write_until(fd, event, sizeof(KeyboardEvent));  
+void write_event(int fd, NPEvent *event) {
+    write_until(fd, event, sizeof(NPEvent));  
 }
 
 void SDL_GL_SwapBuffers(void) {
@@ -279,14 +323,17 @@ void SDL_GL_SwapBuffers(void) {
 
         // Send related events to remote.
         switch(event.type) {
+			case SDL_MOUSEMOTION:
+			case SDL_MOUSEBUTTONUP:
+			case SDL_MOUSEBUTTONDOWN:
             case SDL_KEYDOWN:
             case SDL_KEYUP: { // Send event to remote.
                 PacketType packetType = PACKET_EVENT;
                 write_until(fd,&packetType,sizeof(PacketType));
 
-                KeyboardEvent kb_event = fromSDLEvent(&event);
-                write_event(fd, &kb_event);
-                darray_push(local_events, kb_event);
+                NPEvent npevent = fromSDLEvent(&event);
+                write_event(fd, &npevent);
+                darray_push(local_events, npevent);
             } break;
         }
     }
@@ -318,7 +365,7 @@ void SDL_GL_SwapBuffers(void) {
                 sync_received = true;
             } break;
             case PACKET_EVENT: {
-                KeyboardEvent recv_event;
+                NPEvent recv_event;
                 read_bytes = read_until(fd, (uint8_t*)&recv_event, sizeof(recv_event));
                 if (read_bytes < 0) {
                     sterf("End of remote stream");
@@ -331,7 +378,7 @@ void SDL_GL_SwapBuffers(void) {
         }
     }
     if (swap) {
-        KeyboardEvent *it;
+        NPEvent *it;
         darray_foreach(it, local_events) {
             SDL_Event ev = toSDLEvent(it);
             printf("local: "); printEvent(&ev);
@@ -343,7 +390,7 @@ void SDL_GL_SwapBuffers(void) {
             cbWrite(&m_events, &ev);
         }
     } else {
-        KeyboardEvent *it;
+        NPEvent *it;
         darray_foreach(it, remote_events) {
             SDL_Event ev = toSDLEvent(it);
             printf("remote: "); printEvent(&ev);

@@ -2,14 +2,17 @@
 
 * SDL_Flip
 * GetTicks
-* GetKeyState
 * GetTime
 * Clock_GetTime
 * open
 * Gamepad
-* Mouse
 * Desync detection (hashing draw calls)
 * Multiple people
+
+# DONE
+* GetKeyState
+* Mouse
+
 
 ## SDL_Flip
 same as SDL_GL_SwapBuffers ?
