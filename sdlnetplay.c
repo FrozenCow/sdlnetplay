@@ -62,10 +62,10 @@ typedef int (*SDL_Init_Func)(Uint32 flags);
 static const void * get_func(const char * name)
 {
     void * func = dlsym(RTLD_NEXT, name);
-    if(func == NULL) {
+/*    if(func == NULL) {
         fprintf(stderr, "Preload error: Failed to get %s symbol.\n", name);
         exit(EXIT_FAILURE);
-    }
+    }*/
     return func;
 }
 
