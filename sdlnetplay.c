@@ -175,7 +175,7 @@ void netplay_connect() {
     if (fd < 0) {
         sterf("Error creating socket");
     }
-    struct hostent *server = gethostbyname("89.99.57.228");
+    struct hostent *server = gethostbyname(getenv("SDLNETPLAY_HOSTNAME"));
     struct sockaddr_in serv_addr;
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
@@ -212,9 +212,13 @@ int SDL_Init(Uint32 flags) {
     fprintf(stdout, "sizeof(SDL_Event) = %u\n", (uint32_t)sizeof(SDL_Event));
     fflush(stdout);
 
+
     if (getenv("SDLNETPLAY_LISTEN")) {
         netplay_listen();
     } else if (getenv("SDLNETPLAY_CONNECT")) {
+		if(getenv("SDLNETPLAY_HOSTNAME") == NULL) {
+			sterf("No SDLNETPLAY_HOSTNAME");
+		}
         netplay_connect();
     } else {
         sterf("No SDLNETPLAY_LISTEN or SDLNETPLAY_CONNECT");
