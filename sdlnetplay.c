@@ -207,6 +207,14 @@ void koekinit() {
     cbInit(&m_events, 256);
 }
 
+static Uint8 m_keystate[SDLK_LAST+1] = { 0 };
+Uint8 *SDL_GetKeyState(int *numkeys) {
+	if(numkeys) {
+		*numkeys = sizeof(m_keystate);
+	}
+	return &m_keystate[0];
+}
+
 int SDL_Init(Uint32 flags) {
     fprintf(stdout, "sizeof(KeyboardEvent) = %u\n", (uint32_t)sizeof(KeyboardEvent));
     fprintf(stdout, "sizeof(SDL_Event) = %u\n", (uint32_t)sizeof(SDL_Event));
@@ -242,6 +250,16 @@ int SDL_PollEvent(SDL_Event *event) {
         return 0;
     } else {
         cbRead(&m_events,event);
+		switch(event->type) {
+			case SDL_KEYDOWN:
+				m_keystate[event->key.keysym.sym] = 1;
+				break;
+			case SDL_KEYUP:
+				m_keystate[event->key.keysym.sym] = 0;
+				break;
+			default:
+				break;
+		}
         printEvent(event);
         return 1;
     }
