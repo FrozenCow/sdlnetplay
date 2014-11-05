@@ -1,3 +1,4 @@
+// vim: tabstop=4 shiftwidth=4 expandtab
 #include <stdlib.h>
 #include <stdio.h>
 #include <SDL/SDL.h>
@@ -91,10 +92,10 @@ typedef struct {
 } KeyboardEvent;
 
 typedef union {
-	uint8_t type;
-	SDL_MouseMotionEvent motion;
-	SDL_MouseButtonEvent button;
-	KeyboardEvent key;
+    uint8_t type;
+    SDL_MouseMotionEvent motion;
+    SDL_MouseButtonEvent button;
+    KeyboardEvent key;
 } NPEvent;
 
 typedef darray(NPEvent) darray_event;
@@ -102,50 +103,50 @@ typedef darray(NPEvent) darray_event;
 SDL_Event toSDLEvent(const NPEvent *event) {
     SDL_Event result;
     result.type = event->type;
-	switch(event->type) {
-	case SDL_KEYUP:
-	case SDL_KEYDOWN:
-		result.key.state = event->key.state;
-		result.key.keysym.scancode = event->key.keysym.scancode;
-		result.key.keysym.sym = event->key.keysym.sym;
-		result.key.keysym.mod = event->key.keysym.mod;
-		result.key.keysym.unicode = event->key.keysym.unicode;
-		break;
-	case SDL_MOUSEMOTION:
-		result.motion = event->motion;
-		break;
-	case SDL_MOUSEBUTTONDOWN:
-	case SDL_MOUSEBUTTONUP:
-		result.button = event->button;
-		break;
-	default:
-		break;
-	}
+    switch(event->type) {
+    case SDL_KEYUP:
+    case SDL_KEYDOWN:
+        result.key.state = event->key.state;
+        result.key.keysym.scancode = event->key.keysym.scancode;
+        result.key.keysym.sym = event->key.keysym.sym;
+        result.key.keysym.mod = event->key.keysym.mod;
+        result.key.keysym.unicode = event->key.keysym.unicode;
+        break;
+    case SDL_MOUSEMOTION:
+        result.motion = event->motion;
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        result.button = event->button;
+        break;
+    default:
+        break;
+    }
     return result;
 }
 
 NPEvent fromSDLEvent(const SDL_Event *event) {
     NPEvent result;
     result.type = event->type;
-	switch(event->type) {
-		case SDL_KEYUP:
-		case SDL_KEYDOWN:
-			result.key.state = event->key.state;
-			result.key.keysym.scancode = event->key.keysym.scancode;
-			result.key.keysym.sym = event->key.keysym.sym;
-			result.key.keysym.mod = event->key.keysym.mod;
-			result.key.keysym.unicode = event->key.keysym.unicode;
-			break;
-		case SDL_MOUSEMOTION:
-			result.motion = event->motion;
-			break;
-		case SDL_MOUSEBUTTONDOWN:
-		case SDL_MOUSEBUTTONUP:
-			result.button = event->button;
-			break;
-		default:
-			break;
-	}
+    switch(event->type) {
+        case SDL_KEYUP:
+        case SDL_KEYDOWN:
+            result.key.state = event->key.state;
+            result.key.keysym.scancode = event->key.keysym.scancode;
+            result.key.keysym.sym = event->key.keysym.sym;
+            result.key.keysym.mod = event->key.keysym.mod;
+            result.key.keysym.unicode = event->key.keysym.unicode;
+            break;
+        case SDL_MOUSEMOTION:
+            result.motion = event->motion;
+            break;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+            result.button = event->button;
+            break;
+        default:
+            break;
+    }
     return result;
 }
 
@@ -245,10 +246,10 @@ void koekinit() {
 
 static Uint8 m_keystate[SDLK_LAST+1] = { 0 };
 Uint8 *SDL_GetKeyState(int *numkeys) {
-	if(numkeys) {
-		*numkeys = sizeof(m_keystate);
-	}
-	return &m_keystate[0];
+    if(numkeys) {
+        *numkeys = sizeof(m_keystate);
+    }
+    return &m_keystate[0];
 }
 
 int SDL_Init(Uint32 flags) {
@@ -260,9 +261,9 @@ int SDL_Init(Uint32 flags) {
     if (getenv("SDLNETPLAY_LISTEN")) {
         netplay_listen();
     } else if (getenv("SDLNETPLAY_CONNECT")) {
-		if(getenv("SDLNETPLAY_HOSTNAME") == NULL) {
-			sterf("No SDLNETPLAY_HOSTNAME");
-		}
+        if(getenv("SDLNETPLAY_HOSTNAME") == NULL) {
+            sterf("No SDLNETPLAY_HOSTNAME");
+        }
         netplay_connect();
     } else {
         sterf("No SDLNETPLAY_LISTEN or SDLNETPLAY_CONNECT");
@@ -277,15 +278,15 @@ int SDL_Init(Uint32 flags) {
 }
 
 void printEvent(SDL_Event *event) {
-	switch(event->type) {
-	case SDL_KEYDOWN:
-	case SDL_KEYUP:
-		fprintf(stdout, "%d: %x > %s\n", framenumber, event->type, SDL_GetKeyName(event->key.keysym.sym));
-		break;
-	default:
-		fprintf(stdout, "\n");
-		break;
-	}
+    switch(event->type) {
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+        fprintf(stdout, "%d: %x > %s\n", framenumber, event->type, SDL_GetKeyName(event->key.keysym.sym));
+        break;
+    default:
+        fprintf(stdout, "\n");
+        break;
+    }
 }
 
 int SDL_PollEvent(SDL_Event *event) {
@@ -294,16 +295,16 @@ int SDL_PollEvent(SDL_Event *event) {
         return 0;
     } else {
         cbRead(&m_events,event);
-		switch(event->type) {
-			case SDL_KEYDOWN:
-				m_keystate[event->key.keysym.sym] = 1;
-				break;
-			case SDL_KEYUP:
-				m_keystate[event->key.keysym.sym] = 0;
-				break;
-			default:
-				break;
-		}
+        switch(event->type) {
+            case SDL_KEYDOWN:
+                m_keystate[event->key.keysym.sym] = 1;
+                break;
+            case SDL_KEYUP:
+                m_keystate[event->key.keysym.sym] = 0;
+                break;
+            default:
+                break;
+        }
         printEvent(event);
         return 1;
     }
@@ -323,9 +324,9 @@ void SDL_GL_SwapBuffers(void) {
 
         // Send related events to remote.
         switch(event.type) {
-			case SDL_MOUSEMOTION:
-			case SDL_MOUSEBUTTONUP:
-			case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEMOTION:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEBUTTONDOWN:
             case SDL_KEYDOWN:
             case SDL_KEYUP: { // Send event to remote.
                 PacketType packetType = PACKET_EVENT;
@@ -410,3 +411,4 @@ void SDL_GL_SwapBuffers(void) {
     // Call SDL_GL_SwapBuffers
     original();
 }
+
