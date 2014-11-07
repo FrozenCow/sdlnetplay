@@ -1,10 +1,17 @@
+CC=g++
+
 all: sdlnetplay.so
 
-sdlnetplay.o: sdlnetplay.c
-	gcc -c -Wall -Werror -fPIC -std=gnu99 -D_GNU_SOURCE sdlnetplay.c
+OBJECTS = \
+	sdlnetplay.o \
+	utils.o \
+	protocol.o
 
-sdlnetplay.so: sdlnetplay.o
-	gcc -shared -fPIC -rdynamic -o sdlnetplay.so sdlnetplay.o -ldl
+%.o: %.c Makefile
+	${CC} -D_GNU_SOURCE -std=c++11 -c -Wall -Werror -fPIC -D_GNU_SOURCE $<
+
+sdlnetplay.so: $(OBJECTS)
+	${CC} -shared -fPIC -rdynamic -o $@ $^ -ldl
 
 clean:
-	rm sdlnetplay.so || true
+	rm *.o sdlnetplay.so || true

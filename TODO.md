@@ -1,7 +1,6 @@
 # TODO
-
-* SDL_Flip
-* GetTicks
+* time
+* gettimeofday
 * GetTime
 * Clock_GetTime
 * open
@@ -12,6 +11,8 @@
 # DONE
 * GetKeyState
 * Mouse
+* SDL_Flip
+* GetTicks
 
 
 ## SDL_Flip
@@ -33,4 +34,3 @@ fill an array from events that also go into the circbuffer now, either in SDL_Po
       send file    |    recv  file
     else
       done
-

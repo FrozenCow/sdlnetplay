@@ -1,258 +1,87 @@
 // vim: tabstop=4 shiftwidth=4 expandtab
-#include <stdlib.h>
-#include <stdio.h>
+#include <cstdlib>
+#include <cstdio>
 #include <SDL/SDL.h>
 #include <dlfcn.h>
-#include <stdint.h>
+#include <cstdint>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <stdbool.h>
-#include <netdb.h>
-#include "darray.h"
-#include "circularbuffer.c"
+#include <cmath>
+#include <climits>
+#include <queue>
+#include <vector>
+
+#include "utils.h"
+#include "protocol.h"
+
+using namespace sdlnetplay;
+
+// Global variables
+static std::queue<SDL_Event> m_events;
+static int framenumber = 0;
+
+//typedef decltype(&SDL_PollEvent) SDL_PollEvent_type;
+
+#define OVERRIDE_FUNC(TYPE) \
+static decltype(&TYPE) TYPE ## _original; \
+void TYPE ## _original_constructor()__attribute__((constructor)); \
+void TYPE ## _original_constructor() { \
+    TYPE ## _original = (decltype(&TYPE))dlsym(RTLD_NEXT, #TYPE); }
 
 
-void sterf(const char *text) {
-    fprintf(stderr,"Error: %s\n", text);
-    exit(EXIT_FAILURE);
+OVERRIDE_FUNC(SDL_PollEvent)
+OVERRIDE_FUNC(SDL_GL_SwapBuffers)
+OVERRIDE_FUNC(SDL_GetKeyState)
+OVERRIDE_FUNC(SDL_Init)
+OVERRIDE_FUNC(SDL_SetVideoMode)
+OVERRIDE_FUNC(SDL_GetTicks)
+OVERRIDE_FUNC(SDL_Flip)
+OVERRIDE_FUNC(SDL_GetModState)
+
+
+
+void init_sdlnetplay()__attribute__((constructor));
+void init_sdlnetplay() {
+    //printf("RAND_MAX: %d\n", RAND_MAX);
 }
 
-
-ssize_t read_until(int fd, void*buf, size_t count) {
-    ssize_t read_bytes = 0;
-    do {
-        ssize_t res = read(fd, &((uint8_t*)buf)[read_bytes], count - read_bytes);
-        if(res < 0) {
-            if(errno == EINTR) {
-                continue;
-            }
-            return res;
-        } else {
-            read_bytes += res;
-        }
-    } while(read_bytes < count);
-    return count;
+void debug(const char *msg) {
+    fprintf(stdout, "%s\n", msg);
+    fflush(stdout);
 }
 
-ssize_t write_until(int fd, const void *buf, size_t count) {
-    ssize_t written_bytes = 0;
-    do {
-        ssize_t res = write(fd, &((uint8_t*)buf)[written_bytes], count - written_bytes);
-        if(res < 0) {
-            if(errno == EINTR) {
-                continue;
-            }
-            return res;
-        } else {
-            written_bytes += res;
-        }
-    } while(written_bytes < count);
-    return count;
-}
-
-
-typedef int (*SDL_PollEvent_Func)(SDL_Event *event);
-typedef void (*SDL_GL_SwapBuffers_Func)(void);
-typedef Uint8 (*SDL_GetKeyState_Func)(int *numkeys);
-typedef int (*SDL_Init_Func)(Uint32 flags);
-
-static const void * get_func(const char * name)
-{
-    void * func = dlsym(RTLD_NEXT, name);
-/*    if(func == NULL) {
-        fprintf(stderr, "Preload error: Failed to get %s symbol.\n", name);
-        exit(EXIT_FAILURE);
-    }*/
-    return func;
-}
-
-
-int fd;
-int swap;
-int framenumber;
-enum { PACKET_SYNC, PACKET_EVENT };
-typedef uint8_t PacketType;
-
-typedef struct {
-    uint8_t scancode;
-    uint32_t sym;
-    uint32_t mod;
-    uint16_t unicode;
-} KeySym;
-
-
-typedef struct {
-    uint8_t type;
-    uint8_t state;
-    KeySym keysym;
-} KeyboardEvent;
-
-typedef union {
-    uint8_t type;
-    SDL_MouseMotionEvent motion;
-    SDL_MouseButtonEvent button;
-    KeyboardEvent key;
-} NPEvent;
-
-typedef darray(NPEvent) darray_event;
-
-SDL_Event toSDLEvent(const NPEvent *event) {
-    SDL_Event result;
-    result.type = event->type;
-    switch(event->type) {
-    case SDL_KEYUP:
-    case SDL_KEYDOWN:
-        result.key.state = event->key.state;
-        result.key.keysym.scancode = event->key.keysym.scancode;
-        result.key.keysym.sym = event->key.keysym.sym;
-        result.key.keysym.mod = event->key.keysym.mod;
-        result.key.keysym.unicode = event->key.keysym.unicode;
-        break;
-    case SDL_MOUSEMOTION:
-        result.motion = event->motion;
-        break;
-    case SDL_MOUSEBUTTONDOWN:
-    case SDL_MOUSEBUTTONUP:
-        result.button = event->button;
-        break;
-    default:
-        break;
-    }
-    return result;
-}
-
-NPEvent fromSDLEvent(const SDL_Event *event) {
-    NPEvent result;
-    result.type = event->type;
-    switch(event->type) {
-        case SDL_KEYUP:
-        case SDL_KEYDOWN:
-            result.key.state = event->key.state;
-            result.key.keysym.scancode = event->key.keysym.scancode;
-            result.key.keysym.sym = event->key.keysym.sym;
-            result.key.keysym.mod = event->key.keysym.mod;
-            result.key.keysym.unicode = event->key.keysym.unicode;
-            break;
-        case SDL_MOUSEMOTION:
-            result.motion = event->motion;
-            break;
-        case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
-            result.button = event->button;
-            break;
-        default:
-            break;
-    }
-    return result;
-}
-
-void netplay_listen() {
-    swap = 0;
-    int serverfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverfd < 0) {
-        sterf("Error creating socket");
-    }
-    struct sockaddr_in serv_addr;
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(8008);
-    serv_addr.sin_addr.s_addr = INADDR_ANY;
-    int optval = 1;
-    setsockopt(serverfd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
-    if (bind(serverfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        sterf("Error binding socket");
-    }
-    if (listen(serverfd,1) < 0) {
-        sterf("Error listening on socket");
-    }
-    
-
-
-    fprintf(stdout,"Accepting clients...\n");
-    fd = accept(serverfd, (struct sockaddr *) NULL, NULL);
-    if (fd < 0) {
-        sterf("Error accepting socket");
-    }
-    fprintf(stdout,"Accepted client.\n");
-}
-
-
-static inline double intnoise(uint64_t x) {
-        x = (x << 13) ^ x;
-            return (1.0 - ((x * (x * x * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0);
-}
-
-
-
-
-
-static inline uint32_t ufindnoise2(int y) {
-    int n = y * 57;
-    n = (n << 13) ^ n;
-    uint32_t nn = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-    return nn;
-}
-#include <math.h>
-#include <limits.h>
-uint32_t v = 0;
+static uint32_t v = 0;
 int rand() {
-    v++;
-    return (int)(cos(v)*RAND_MAX) ^ 1376312589;
-    // v = ufindnoise2(v);
-    // return v;
-}
-
-void netplay_connect() {
-    swap = 1;
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-        sterf("Error creating socket");
-    }
-    struct hostent *server = gethostbyname(getenv("SDLNETPLAY_HOSTNAME"));
-    struct sockaddr_in serv_addr;
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr,
-          (char *)&serv_addr.sin_addr.s_addr,
-          server->h_length);
-    serv_addr.sin_port = htons(8008);
-    fprintf(stdout,"Connecting to server...\n");
-    if (connect(fd,&serv_addr,sizeof(serv_addr)) < 0) {
-        sterf("Error connecting to address");
-    }
-    fprintf(stdout,"Connected\n");
-}
-
-static CircularBuffer m_events;
-static SDL_PollEvent_Func SDL_PollEvent_original = NULL;
-static SDL_GL_SwapBuffers_Func original = NULL;
-static SDL_GetKeyState_Func SDL_GetKeyState_original = NULL;
-static SDL_Init_Func SDL_Init_original = NULL;
-
-
-void koekinit()__attribute__((constructor));
-void koekinit() {
-    SDL_PollEvent_original = get_func("SDL_PollEvent");
-    original = get_func("SDL_GL_SwapBuffers");
-    SDL_GetKeyState_original = get_func("SDL_GetKeyState");
-    SDL_Init_original = get_func("SDL_Init");
-
-    cbInit(&m_events, 256);
+    debug("rand");
+    v = abs((v + (RAND_MAX / 32) + 1) % RAND_MAX);
+//    return (int)(cos(v)*RAND_MAX) ^ 1376312589;
+    return v;
 }
 
 static Uint8 m_keystate[SDLK_LAST+1] = { 0 };
 Uint8 *SDL_GetKeyState(int *numkeys) {
+    debug("SDL_GetKeyState");
     if(numkeys) {
         *numkeys = sizeof(m_keystate);
     }
     return &m_keystate[0];
 }
+static SDLMod m_modstate = KMOD_NONE;
+SDLMod SDL_GetModState(void) {
+    return m_modstate;
+}
+
+SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags) {
+    debug("SDL_SetVideoMode");
+    SDL_Surface *result = SDL_SetVideoMode_original(width, height, bpp, flags);
+    
+    return result;
+}
 
 int SDL_Init(Uint32 flags) {
+    debug("SDL_Init");
     fprintf(stdout, "sizeof(NPEvent) = %u\n", (uint32_t)sizeof(NPEvent));
     fprintf(stdout, "sizeof(SDL_Event) = %u\n", (uint32_t)sizeof(SDL_Event));
     fflush(stdout);
@@ -262,22 +91,23 @@ int SDL_Init(Uint32 flags) {
         netplay_listen();
     } else if (getenv("SDLNETPLAY_CONNECT")) {
         if(getenv("SDLNETPLAY_HOSTNAME") == NULL) {
-            sterf("No SDLNETPLAY_HOSTNAME");
+            die("No SDLNETPLAY_HOSTNAME");
         }
         netplay_connect();
     } else {
-        sterf("No SDLNETPLAY_LISTEN or SDLNETPLAY_CONNECT");
-    }
-
-    { // Disable Nagle buffering algorithm.
-        int flag = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
+        die("No SDLNETPLAY_LISTEN or SDLNETPLAY_CONNECT");
     }
 
     return SDL_Init_original(flags);
 }
 
-void printEvent(SDL_Event *event) {
+static Uint32 ticks = 0;
+Uint32 SDL_GetTicks(void) {
+    debug("SDL_GetTicks");
+    return ticks++;
+}
+
+static void printEvent(SDL_Event *event) {
     switch(event->type) {
     case SDL_KEYDOWN:
     case SDL_KEYUP:
@@ -289,39 +119,82 @@ void printEvent(SDL_Event *event) {
     }
 }
 
-int SDL_PollEvent(SDL_Event *event) {
-    // Trek m_events leeg
-    if(cbIsEmpty(&m_events)) {
-        return 0;
-    } else {
-        cbRead(&m_events,event);
-        switch(event->type) {
-            case SDL_KEYDOWN:
-                m_keystate[event->key.keysym.sym] = 1;
-                break;
-            case SDL_KEYUP:
-                m_keystate[event->key.keysym.sym] = 0;
-                break;
+static bool syncReceived = true;
+static std::vector<NPEvent> local_events;
+
+static void receiveSync() {
+    if (syncReceived) { return; }
+    // Receive remote packets.
+    bool sync_packet_received = false;
+    std::vector<NPEvent> remote_events;
+    while(!sync_packet_received) {
+        PacketType packet_type = 0; 
+        ssize_t read_bytes = read_until(fd, &packet_type, sizeof(PacketType));
+        if(read_bytes < 0) {
+            die("End of remote stream");
+        }
+        switch(packet_type) {
+            case PACKET_SYNC: {
+                fprintf(stdout,"%d: sync\n", framenumber);
+                uint32_t remote_framenumber;
+                if (read_until(fd,&remote_framenumber,sizeof(remote_framenumber)) < 0) {
+                    fprintf(stdout,"Desync detected: %d != %d\n", remote_framenumber, framenumber);
+                    die("Desync");
+                }
+                sync_packet_received = true;
+            } break;
+            case PACKET_EVENT: {
+                NPEvent recv_event;
+                read_bytes = read_until(fd, (uint8_t*)&recv_event, sizeof(recv_event));
+                if (read_bytes < 0) {
+                    die("End of remote stream");
+                }
+                remote_events.push_back(recv_event);
+            } break;
             default:
+                die("No such packet type");
                 break;
         }
-        printEvent(event);
-        return 1;
     }
+    if (is_server) {
+        for(auto &it : local_events) {
+            SDL_Event ev = toSDLEvent(&it);
+            printf("local: "); printEvent(&ev);
+            
+            m_events.push(ev);
+        }
+        for(auto &it : remote_events) {
+            SDL_Event ev = toSDLEvent(&it);
+            printf("remote: "); printEvent(&ev);
+            m_events.push(ev);
+        }
+    } else {
+        for(auto &it : remote_events) {
+            SDL_Event ev = toSDLEvent(&it);
+            printf("remote: "); printEvent(&ev);
+            m_events.push(ev);
+        }
+        for(auto &it : local_events) {
+            SDL_Event ev = toSDLEvent(&it);
+            printf("local: "); printEvent(&ev);
+            m_events.push(ev);
+        }
+    }
+    local_events.clear();
+    
+    syncReceived = true;
 }
 
-void write_event(int fd, NPEvent *event) {
-    write_until(fd, event, sizeof(NPEvent));  
-}
-
-void SDL_GL_SwapBuffers(void) {
+static void sendSync() {
+    if (!syncReceived) {
+        receiveSync();
+    }
+    // Send events, empty buffer.
     fflush(stdout);
     framenumber++;
+    ticks++;
     SDL_Event event;
-    darray_event local_events = darray_new();
     while(SDL_PollEvent_original(&event)) {
-        
-
         // Send related events to remote.
         switch(event.type) {
             case SDL_MOUSEMOTION:
@@ -331,10 +204,29 @@ void SDL_GL_SwapBuffers(void) {
             case SDL_KEYUP: { // Send event to remote.
                 PacketType packetType = PACKET_EVENT;
                 write_until(fd,&packetType,sizeof(PacketType));
-
                 NPEvent npevent = fromSDLEvent(&event);
                 write_event(fd, &npevent);
-                darray_push(local_events, npevent);
+                local_events.push_back(npevent);
+            } break;
+            case SDL_NOEVENT:
+            case SDL_ACTIVEEVENT:
+            case SDL_JOYAXISMOTION:
+            case SDL_JOYBALLMOTION:
+            case SDL_JOYHATMOTION:
+            case SDL_JOYBUTTONDOWN:
+            case SDL_JOYBUTTONUP:
+            case SDL_SYSWMEVENT:
+            case SDL_VIDEORESIZE:
+            case SDL_VIDEOEXPOSE: {
+            	// Ignore these.
+            } break;
+            case SDL_USEREVENT:
+            case SDL_QUIT: {
+            	// Let these through.
+            	m_events.push(event);
+            } break;
+            default: {
+                die("Unknown SDL event");
             } break;
         }
     }
@@ -346,69 +238,44 @@ void SDL_GL_SwapBuffers(void) {
         write_until(fd,&local_framenumber,sizeof(local_framenumber));
     }
 
-    // Receive remote packets.
-    bool sync_received = false;
-    darray_event remote_events = darray_new();
-    while(!sync_received) {
-        PacketType packet_type = 0; 
-        ssize_t read_bytes = read_until(fd, &packet_type, sizeof(PacketType));
-        if(read_bytes < 0) {
-            sterf("End of remote stream");
-        }
-        switch(packet_type) {
-            case PACKET_SYNC: {
-                fprintf(stdout,"%d: sync\n", framenumber);
-                uint32_t remote_framenumber;
-                if (read_until(fd,&remote_framenumber,sizeof(remote_framenumber)) < 0) {
-                    fprintf(stdout,"Desync detected: %d != %d\n", remote_framenumber, framenumber);
-                    sterf("Desync");
-                }
-                sync_received = true;
-            } break;
-            case PACKET_EVENT: {
-                NPEvent recv_event;
-                read_bytes = read_until(fd, (uint8_t*)&recv_event, sizeof(recv_event));
-                if (read_bytes < 0) {
-                    sterf("End of remote stream");
-                }
-                darray_push(remote_events, recv_event);
-            } break;
-            default:
-                sterf("No such packet type");
-                break;
-        }
-    }
-    if (swap) {
-        NPEvent *it;
-        darray_foreach(it, local_events) {
-            SDL_Event ev = toSDLEvent(it);
-            printf("local: "); printEvent(&ev);
-            cbWrite(&m_events, &ev);
-        }
-        darray_foreach(it, remote_events) {
-            SDL_Event ev = toSDLEvent(it);
-            printf("remote: "); printEvent(&ev);
-            cbWrite(&m_events, &ev);
-        }
-    } else {
-        NPEvent *it;
-        darray_foreach(it, remote_events) {
-            SDL_Event ev = toSDLEvent(it);
-            printf("remote: "); printEvent(&ev);
-            cbWrite(&m_events, &ev);
-        }
-        darray_foreach(it, local_events) {
-            SDL_Event ev = toSDLEvent(it);
-            printf("local: "); printEvent(&ev);
-            cbWrite(&m_events, &ev);
-        }
-    }
-    
-
-    darray_free(local_events);
-    darray_free(remote_events);
-
-    // Call SDL_GL_SwapBuffers
-    original();
+    syncReceived = false;
 }
 
+int SDL_PollEvent(SDL_Event *event) {
+    debug("SDL_PollEvent");
+    // Trek m_events leeg
+    if(m_events.empty()) {
+        sendSync();
+        return 0;
+    } else {
+        *event = m_events.front();
+        m_events.pop();
+        switch(event->type) {
+            case SDL_KEYDOWN:
+                m_keystate[event->key.keysym.sym] = 1;
+                m_modstate = event->key.keysym.mod;
+                break;
+            case SDL_KEYUP:
+                m_keystate[event->key.keysym.sym] = 0;
+                m_modstate = event->key.keysym.mod;
+                break;
+            default:
+                break;
+        }
+        printEvent(event);
+        return 1;
+    }
+    return 1;
+}
+
+int SDL_Flip(SDL_Surface* screen) {
+    debug("SDL_Flip");
+    receiveSync();
+    return SDL_Flip_original(screen);
+}
+
+void SDL_GL_SwapBuffers(void) {
+    debug("SDL_GL_SwapBuffers");
+    receiveSync();
+    SDL_GL_SwapBuffers_original();
+}
