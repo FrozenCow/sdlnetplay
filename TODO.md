@@ -7,6 +7,7 @@
 * Gamepad
 * Desync detection (hashing draw calls)
 * Multiple people
+* Experiment with disabling address space layout randomization (does this create consistent address layouts on different machines?)
 
 # DONE
 * GetKeyState
@@ -14,6 +15,14 @@
 * SDL_Flip
 * GetTicks
 
+## ASLR (Address Space Layout Randomization)
+Disabling ASLR via setarch `uname -m` -R <program> could eliminate an annoying source of desynchronization. Example:
+
+    ldd /usr/bin/ls
+    
+vs
+
+    setarch `uname -m` -R ldd /usr/bin/ls
 
 ## SDL_Flip
 same as SDL_GL_SwapBuffers ?
