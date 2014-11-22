@@ -11,6 +11,13 @@ namespace sdlnetplay {
 
 int fd;
 bool is_server = false;
+SyncChannel *syncChannel;
+FSyncChannel *fsyncChannel;
+std::vector<ChannelQueue*> channels;
+
+void write_event(int fd, NPEvent *event) {
+    write_until(fd, event, sizeof(NPEvent));  
+}
 
 SDL_Event toSDLEvent(const NPEvent *event) {
     SDL_Event result;
@@ -62,6 +69,18 @@ NPEvent fromSDLEvent(const SDL_Event *event) {
     return result;
 }
 
+bool inited = false;
+void netplay_init() {
+    if(inited) {
+        die("netplay was already initialized");
+    }
+    channels.push_back(syncChannel = new SyncChannel());
+    channels.push_back(fsyncChannel = new FSyncChannel());
+    channels[0]->id = 0;
+    channels[1]->id = 1;
+    inited = true;
+}
+
 void netplay_listen() {
     is_server = true;
     int serverfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -82,8 +101,6 @@ void netplay_listen() {
         die("Error listening on socket");
     }
     
-
-
     fprintf(stdout,"Accepting clients...\n");
     fd = accept(serverfd, (struct sockaddr *) NULL, NULL);
     if (fd < 0) {
@@ -96,6 +113,8 @@ void netplay_listen() {
     }
     
     fprintf(stdout,"Accepted client.\n");
+
+    netplay_init();
 }
 
 void netplay_connect() {
@@ -123,10 +142,78 @@ void netplay_connect() {
         int flag = 1;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
     }
+
+    netplay_init();
 }
 
-void write_event(int fd, NPEvent *event) {
-    write_until(fd, event, sizeof(NPEvent));  
+
+void SyncChannel::read_packet(SyncPacket *packet) {
+    printf("FD:%d\n", fd);
+    if(read_until(fd, &packet->framenumber, sizeof(packet->framenumber)) < 0) {
+        die("Failed to read framenumber");
+    }
+    uint16_t count;
+    if(read_until(fd, &count, sizeof(count)) < 0) {
+        die("Failed to read event count");
+    }
+    //packet->events.resize(count);
+    while(packet->events.size() < count) {
+        NPEvent event;
+        if(read_until(fd, &event, sizeof(event)) < 0) {
+            die("Failed to read event");
+        }
+        packet->events.push_back(event);
+    }
+}
+
+void SyncChannel::write_packet(SyncPacket &packet) {
+    if(write_until(fd, &packet.framenumber, sizeof(packet.framenumber)) < 0) {
+        die("Failed to write frame number");
+    }
+    uint16_t count = (uint16_t)packet.events.size();
+    if(write_until(fd, &count, sizeof(count)) < 0) {
+        die("Failed to write event count");
+    }
+    for(size_t i=0;i<packet.events.size();i++) {
+        if(write_until(fd, &(packet.events[i]), sizeof(NPEvent)) < 0) {
+            die("Failed to write event");
+        }
+    }
+}
+
+void SyncChannel::read_and_queue_packet() {
+    SyncPacket packet;
+    read_packet(&packet);
+    pending.push(packet);
+}
+
+void FSyncChannel::read_packet(FSyncPacket *packet) {
+    uint32_t len;
+    if (read_until(fd, &len, sizeof(len)) < 0) {
+        die("Failed to read FSync packet len");
+    }
+    if(read_until(fd, packet->name, (size_t)len) < 0) {
+        die("Failed to read FSync packet name");
+    }
+}
+
+void FSyncChannel::write_packet(FSyncPacket &packet) {
+    uint32_t len = strlen(packet.name) + 1;
+    if (len > 1024) {
+        die("fsync function name too long (local)");
+    }
+    if (write_until(fd, &len, sizeof(uint32_t)) < 0) {
+        die("Failed to write FSyncPacket");
+    }
+    if (write_until(fd, packet.name, sizeof(char)*len) < 0) {
+        die("Failed to write FSyncPacket");
+    }
+}
+
+void FSyncChannel::read_and_queue_packet() {
+    FSyncPacket msg;
+    read_packet(&msg);
+    pending.push(msg);
 }
 
 }

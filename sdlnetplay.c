@@ -12,6 +12,8 @@
 #include <climits>
 #include <queue>
 #include <vector>
+#include <pthread.h>
+#include <sys/time.h>
 
 #include "utils.h"
 #include "protocol.h"
@@ -21,7 +23,12 @@ using namespace sdlnetplay;
 // Global variables
 static std::queue<SDL_Event> m_events;
 static int framenumber = 0;
+static int m_mouse_x = 0;
+static int m_mouse_y = 0;
+static Uint32 m_mouse_state = 0;
+static pthread_t m_main_thread = 0;
 
+static thread_local int m_masking = 0;
 //typedef decltype(&SDL_PollEvent) SDL_PollEvent_type;
 
 #define OVERRIDE_FUNC(TYPE) \
@@ -34,26 +41,137 @@ void TYPE ## _original_constructor() { \
 OVERRIDE_FUNC(SDL_PollEvent)
 OVERRIDE_FUNC(SDL_GL_SwapBuffers)
 OVERRIDE_FUNC(SDL_GetKeyState)
+OVERRIDE_FUNC(SDL_GetMouseState)
+OVERRIDE_FUNC(SDL_GetRelativeMouseState)
 OVERRIDE_FUNC(SDL_Init)
 OVERRIDE_FUNC(SDL_SetVideoMode)
 OVERRIDE_FUNC(SDL_GetTicks)
 OVERRIDE_FUNC(SDL_Flip)
 OVERRIDE_FUNC(SDL_GetModState)
+OVERRIDE_FUNC(SDL_Delay)
+OVERRIDE_FUNC(SDL_OpenAudio)
+OVERRIDE_FUNC(pthread_mutex_lock)
+OVERRIDE_FUNC(pthread_create)
+OVERRIDE_FUNC(time)
+OVERRIDE_FUNC(clock)
+OVERRIDE_FUNC(clock_gettime)
+OVERRIDE_FUNC(gettimeofday)
+OVERRIDE_FUNC(rand)
+
+#define FSYNC do { fsync(__func__); } while(0);
+
+struct Unmask {
+    Unmask() {
+        debug("unmasking");
+        m_masking++;
+    };
+    ~Unmask() {
+        debug("masking");
+        m_masking--;
+    }
+};
+
+inline bool ismasking() { return m_masking == 0; }
+
+void fsync(const char *name) {
+    if (pthread_self() != m_main_thread) {
+        return;
+    }
+    FSyncPacket local_packet;
+    strcpy(local_packet.name, name);
+    write_to_channel(fsyncChannel, local_packet);
+    FSyncPacket remote_packet;
+    read_from_channel(fsyncChannel, &remote_packet);
+    if (strcmp(local_packet.name, remote_packet.name) != 0) {
+        debug("FAIL");
+        debug(local_packet.name);
+        debug(remote_packet.name);
+        die("FSYNC Failed");
+    }
+}
+
+void SDL_Delay(Uint32 ticks) {
+    if (!ismasking()) { return SDL_Delay_original(ticks); }
+    debug("SDL_Delay");
+    FSYNC
+    //nope
+}
+
+static thread_local uint64_t t = 0;
+/*time_t time (time_t* timer) {
+    debug("time");
+    return t++;
+}*/
+
+clock_t clock (void) {
+    debug("clock");
+    FSYNC
+    return t++;
+}
+
+//struct timespec {
+//        time_t   tv_sec;        /* seconds */
+//        long     tv_nsec;       /* nanoseconds */
+//};
+
+int clock_gettime(clockid_t clk_id, struct timespec *tp) {
+    if (!ismasking()) { return clock_gettime_original(clk_id, tp); }
+    debug("clock_gettime");
+    FSYNC
+    tp->tv_sec = t;
+    tp->tv_nsec = t;
+
+    return 0; // success
+}
 
 
+//struct timeval {
+//    time_t      tv_sec;     /* seconds */
+//    suseconds_t tv_usec;    /* microseconds */
+//};
+
+//struct timezone {
+//    int tz_minuteswest;     /* minutes west of Greenwich */
+//    int tz_dsttime;         /* type of DST correction */
+//};
+
+/*int gettimeofday(struct timeval *tv, struct timezone *tz) {
+    debug("gettimeofday");
+    tv->tv_sec = t;
+    tv->tv_usec = t;
+    tz->tz_minuteswest = 0;
+    tz->tz_dsttime = 0;
+    return 0; // success
+}*/
 
 void init_sdlnetplay()__attribute__((constructor));
 void init_sdlnetplay() {
     //printf("RAND_MAX: %d\n", RAND_MAX);
+
 }
 
-void debug(const char *msg) {
-    fprintf(stdout, "%s\n", msg);
-    fflush(stdout);
+
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                   void *(*start_routine) (void *), void *arg) {
+    fprintf(stdout, "start_routine: %p ", start_routine);
+    debug("pthread_create");
+    Unmask m;
+    return pthread_create_original(thread, attr, start_routine, arg);
 }
 
-static uint32_t v = 0;
+//int pthread_mutex_lock(pthread_mutex_t *mutex) {
+/*    if(SDL_Init_original) {
+        //fprintf(stdout, "thread: %lu, mutex: %x ", pthread_self(), (unsigned int)mutex);
+        //debug("pthread_mutex_lock");
+        //usleep(1000000);
+    }*/
+//    return pthread_mutex_lock_original(mutex);
+//}
+
+
+static thread_local uint32_t v = 0;
 int rand() {
+    if (!ismasking()) { return rand_original(); }
     debug("rand");
     v = abs((v + (RAND_MAX / 32) + 1) % RAND_MAX);
 //    return (int)(cos(v)*RAND_MAX) ^ 1376312589;
@@ -62,7 +180,9 @@ int rand() {
 
 static Uint8 m_keystate[SDLK_LAST+1] = { 0 };
 Uint8 *SDL_GetKeyState(int *numkeys) {
+    if (!ismasking()) { return SDL_GetKeyState_original(numkeys); }
     debug("SDL_GetKeyState");
+    FSYNC
     if(numkeys) {
         *numkeys = sizeof(m_keystate);
     }
@@ -70,18 +190,48 @@ Uint8 *SDL_GetKeyState(int *numkeys) {
 }
 static SDLMod m_modstate = KMOD_NONE;
 SDLMod SDL_GetModState(void) {
+    if (!ismasking()) { return SDL_GetModState_original(); }
+    FSYNC
     return m_modstate;
 }
 
+DECLSPEC Uint8 SDLCALL SDL_GetMouseState(int *x, int *y) {
+    if (!ismasking()) { return SDL_GetMouseState_original(x, y); }
+    debug("SDL_GetMouseState");
+    FSYNC
+    if(x) *x = m_mouse_x;
+    if(y) *y = m_mouse_y;
+    return m_mouse_state;
+}
+
+static int m_mouse_rel_x = 0;
+static int m_mouse_rel_y = 0;
+Uint8 SDLCALL SDL_GetRelativeMouseState(int *x, int *y) {
+    if (!ismasking()) { return SDL_GetRelativeMouseState_original(x, y); }
+    debug("SDL_GetRelativeMouseState");
+    FSYNC
+    if(x) { *x = m_mouse_rel_x - m_mouse_x; }
+    if(y) { *y = m_mouse_rel_y - m_mouse_y; }
+    m_mouse_rel_x = m_mouse_x;
+    m_mouse_rel_y = m_mouse_y;
+    return m_mouse_state;
+}
+
 SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags) {
+    if (!ismasking()) { return SDL_SetVideoMode_original(width, height, bpp, flags); }
     debug("SDL_SetVideoMode");
-    SDL_Surface *result = SDL_SetVideoMode_original(width, height, bpp, flags);
-    
-    return result;
+    FSYNC
+
+    Unmask m;
+    return SDL_SetVideoMode_original(width, height, bpp, flags);
 }
 
 int SDL_Init(Uint32 flags) {
+
+
+    if (!ismasking()) { return SDL_Init_original(flags); }
     debug("SDL_Init");
+    m_main_thread = pthread_self();
     fprintf(stdout, "sizeof(NPEvent) = %u\n", (uint32_t)sizeof(NPEvent));
     fprintf(stdout, "sizeof(SDL_Event) = %u\n", (uint32_t)sizeof(SDL_Event));
     fflush(stdout);
@@ -98,12 +248,18 @@ int SDL_Init(Uint32 flags) {
         die("No SDLNETPLAY_LISTEN or SDLNETPLAY_CONNECT");
     }
 
+    FSYNC
+
+    Unmask m;
     return SDL_Init_original(flags);
 }
 
 static Uint32 ticks = 0;
 Uint32 SDL_GetTicks(void) {
+    if (!ismasking()) { return SDL_GetTicks_original(); }
+    fprintf(stdout, "ticks: %u", ticks);
     debug("SDL_GetTicks");
+    FSYNC
     return ticks++;
 }
 
@@ -125,37 +281,10 @@ static std::vector<NPEvent> local_events;
 static void receiveSync() {
     if (syncReceived) { return; }
     // Receive remote packets.
-    bool sync_packet_received = false;
-    std::vector<NPEvent> remote_events;
-    while(!sync_packet_received) {
-        PacketType packet_type = 0; 
-        ssize_t read_bytes = read_until(fd, &packet_type, sizeof(PacketType));
-        if(read_bytes < 0) {
-            die("End of remote stream");
-        }
-        switch(packet_type) {
-            case PACKET_SYNC: {
-                fprintf(stdout,"%d: sync\n", framenumber);
-                uint32_t remote_framenumber;
-                if (read_until(fd,&remote_framenumber,sizeof(remote_framenumber)) < 0) {
-                    fprintf(stdout,"Desync detected: %d != %d\n", remote_framenumber, framenumber);
-                    die("Desync");
-                }
-                sync_packet_received = true;
-            } break;
-            case PACKET_EVENT: {
-                NPEvent recv_event;
-                read_bytes = read_until(fd, (uint8_t*)&recv_event, sizeof(recv_event));
-                if (read_bytes < 0) {
-                    die("End of remote stream");
-                }
-                remote_events.push_back(recv_event);
-            } break;
-            default:
-                die("No such packet type");
-                break;
-        }
-    }
+    SyncPacket syncPacket;
+    read_from_channel(syncChannel, &syncPacket);
+    std::vector<NPEvent> &remote_events = syncPacket.events;
+
     if (is_server) {
         for(auto &it : local_events) {
             SDL_Event ev = toSDLEvent(&it);
@@ -189,11 +318,15 @@ static void sendSync() {
     if (!syncReceived) {
         receiveSync();
     }
+    
+    SyncPacket packet;
+    
     // Send events, empty buffer.
     fflush(stdout);
     framenumber++;
     ticks++;
     SDL_Event event;
+    Unmask m;
     while(SDL_PollEvent_original(&event)) {
         // Send related events to remote.
         switch(event.type) {
@@ -202,10 +335,8 @@ static void sendSync() {
             case SDL_MOUSEBUTTONDOWN:
             case SDL_KEYDOWN:
             case SDL_KEYUP: { // Send event to remote.
-                PacketType packetType = PACKET_EVENT;
-                write_until(fd,&packetType,sizeof(PacketType));
                 NPEvent npevent = fromSDLEvent(&event);
-                write_event(fd, &npevent);
+                packet.events.push_back(npevent);
                 local_events.push_back(npevent);
             } break;
             case SDL_NOEVENT:
@@ -217,10 +348,10 @@ static void sendSync() {
             case SDL_JOYBUTTONUP:
             case SDL_SYSWMEVENT:
             case SDL_VIDEORESIZE:
+            case SDL_USEREVENT:
             case SDL_VIDEOEXPOSE: {
             	// Ignore these.
             } break;
-            case SDL_USEREVENT:
             case SDL_QUIT: {
             	// Let these through.
             	m_events.push(event);
@@ -231,12 +362,8 @@ static void sendSync() {
         }
     }
 
-    { // Send sync to remote.
-        PacketType packetType = PACKET_SYNC;
-        write_until(fd,&packetType,sizeof(packetType));
-        uint32_t local_framenumber = framenumber;
-        write_until(fd,&local_framenumber,sizeof(local_framenumber));
-    }
+    packet.framenumber = framenumber;
+    write_to_channel(syncChannel, packet);
 
     syncReceived = false;
 }
@@ -259,6 +386,21 @@ int SDL_PollEvent(SDL_Event *event) {
                 m_keystate[event->key.keysym.sym] = 0;
                 m_modstate = event->key.keysym.mod;
                 break;
+            case SDL_MOUSEMOTION:
+                m_mouse_state = event->motion.state;
+                m_mouse_x = event->motion.x;
+                m_mouse_y = event->motion.y;
+                break;
+            case SDL_MOUSEBUTTONUP:
+                m_mouse_state &= ~SDL_BUTTON(event->button.button);
+                m_mouse_x = event->button.x;
+                m_mouse_y = event->button.y;
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+                m_mouse_state |= SDL_BUTTON(event->button.button);
+                m_mouse_x = event->button.x;
+                m_mouse_y = event->button.y;
+                break;
             default:
                 break;
         }
@@ -268,14 +410,26 @@ int SDL_PollEvent(SDL_Event *event) {
     return 1;
 }
 
+int SDLCALL SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
+    if (!ismasking()) { return SDL_OpenAudio_original(desired, obtained); }
+    Unmask m;
+    debug("SDL_OpenAudio");
+    FSYNC
+    return SDL_OpenAudio_original(desired, obtained);
+}
+
 int SDL_Flip(SDL_Surface* screen) {
+    if (!ismasking()) { return SDL_Flip_original(screen); }
     debug("SDL_Flip");
     receiveSync();
+    Unmask m;
     return SDL_Flip_original(screen);
 }
 
 void SDL_GL_SwapBuffers(void) {
+    if (!ismasking()) { return SDL_GL_SwapBuffers_original(); }
     debug("SDL_GL_SwapBuffers");
     receiveSync();
+    Unmask m;
     SDL_GL_SwapBuffers_original();
 }
