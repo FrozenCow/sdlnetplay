@@ -16,22 +16,22 @@
 * Super Meat Boy
 
 # TODO
-* time
-* gettimeofday
-* GetTime
-* Clock_GetTime
 * open
 * Gamepad
 * Desync detection (hashing draw calls)
 * Multiple people
-* Experiment with disabling address space layout randomization (does this create consistent address layouts on different machines?)
 * De tijd synchroniseren bij sync
 
 # DONE
+* time
+* gettimeofday
+* GetTime
+* Clock_GetTime
 * GetKeyState
 * Mouse
 * SDL_Flip
 * GetTicks
+* Experiment with disabling address space layout randomization (does this create consistent address layouts on different machines?) (It doesn't)
 
 ## ASLR (Address Space Layout Randomization)
 Disabling ASLR via setarch `uname -m` -R <program> could eliminate an annoying source of desynchronization. Example:
