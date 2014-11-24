@@ -14,6 +14,7 @@
 #include <vector>
 #include <pthread.h>
 #include <sys/time.h>
+#include <GL/gl.h>
 
 #include "utils.h"
 #include "protocol.h"
@@ -50,6 +51,7 @@ OVERRIDE_FUNC(SDL_Flip)
 OVERRIDE_FUNC(SDL_GetModState)
 OVERRIDE_FUNC(SDL_Delay)
 OVERRIDE_FUNC(SDL_OpenAudio)
+OVERRIDE_FUNC(SDL_CreateThread)
 OVERRIDE_FUNC(pthread_mutex_lock)
 OVERRIDE_FUNC(pthread_create)
 OVERRIDE_FUNC(time)
@@ -57,6 +59,7 @@ OVERRIDE_FUNC(clock)
 OVERRIDE_FUNC(clock_gettime)
 OVERRIDE_FUNC(gettimeofday)
 OVERRIDE_FUNC(rand)
+OVERRIDE_FUNC(glBegin)
 
 #define FSYNC do { fsync(__func__); } while(0);
 
@@ -90,9 +93,20 @@ void fsync(const char *name) {
     }
 }
 
+bool caller_is_in_executable(void * caller_ret_addr) {
+
+    return
+        (sizeof(void*) == 8 && caller_ret_addr < (void*)0x500000) ||
+        (sizeof(void*) == 4 && caller_ret_addr < (void*)0x09000000);
+}
+
+#define CALLER_IS_LIBRARY (!caller_is_in_executable(__builtin_return_address(0)))
+
 void SDL_Delay(Uint32 ticks) {
-    if (!ismasking()) { return SDL_Delay_original(ticks); }
-    debug("SDL_Delay");
+//    void * return_addr = __builtin_return_address(0);
+
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_Delay_original(ticks); }
+    //debug("SDL_Delay");
     FSYNC
     //nope
 }
@@ -115,9 +129,10 @@ clock_t clock (void) {
 //};
 
 int clock_gettime(clockid_t clk_id, struct timespec *tp) {
-    if (!ismasking()) { return clock_gettime_original(clk_id, tp); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return clock_gettime_original(clk_id, tp); }
     debug("clock_gettime");
     FSYNC
+    t++;
     tp->tv_sec = t;
     tp->tv_nsec = t;
 
@@ -153,7 +168,7 @@ void init_sdlnetplay() {
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                    void *(*start_routine) (void *), void *arg) {
-    fprintf(stdout, "start_routine: %p ", start_routine);
+    fprintf(stderr, "start_routine: %p ", start_routine);
     debug("pthread_create");
     Unmask m;
     return pthread_create_original(thread, attr, start_routine, arg);
@@ -171,8 +186,9 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
 static thread_local uint32_t v = 0;
 int rand() {
-    if (!ismasking()) { return rand_original(); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return rand_original(); }
     debug("rand");
+    FSYNC
     v = abs((v + (RAND_MAX / 32) + 1) % RAND_MAX);
 //    return (int)(cos(v)*RAND_MAX) ^ 1376312589;
     return v;
@@ -180,7 +196,7 @@ int rand() {
 
 static Uint8 m_keystate[SDLK_LAST+1] = { 0 };
 Uint8 *SDL_GetKeyState(int *numkeys) {
-    if (!ismasking()) { return SDL_GetKeyState_original(numkeys); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetKeyState_original(numkeys); }
     debug("SDL_GetKeyState");
     FSYNC
     if(numkeys) {
@@ -190,13 +206,13 @@ Uint8 *SDL_GetKeyState(int *numkeys) {
 }
 static SDLMod m_modstate = KMOD_NONE;
 SDLMod SDL_GetModState(void) {
-    if (!ismasking()) { return SDL_GetModState_original(); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetModState_original(); }
     FSYNC
     return m_modstate;
 }
 
 DECLSPEC Uint8 SDLCALL SDL_GetMouseState(int *x, int *y) {
-    if (!ismasking()) { return SDL_GetMouseState_original(x, y); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetMouseState_original(x, y); }
     debug("SDL_GetMouseState");
     FSYNC
     if(x) *x = m_mouse_x;
@@ -207,7 +223,7 @@ DECLSPEC Uint8 SDLCALL SDL_GetMouseState(int *x, int *y) {
 static int m_mouse_rel_x = 0;
 static int m_mouse_rel_y = 0;
 Uint8 SDLCALL SDL_GetRelativeMouseState(int *x, int *y) {
-    if (!ismasking()) { return SDL_GetRelativeMouseState_original(x, y); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetRelativeMouseState_original(x, y); }
     debug("SDL_GetRelativeMouseState");
     FSYNC
     if(x) { *x = m_mouse_rel_x - m_mouse_x; }
@@ -218,7 +234,7 @@ Uint8 SDLCALL SDL_GetRelativeMouseState(int *x, int *y) {
 }
 
 SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags) {
-    if (!ismasking()) { return SDL_SetVideoMode_original(width, height, bpp, flags); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_SetVideoMode_original(width, height, bpp, flags); }
     debug("SDL_SetVideoMode");
     FSYNC
 
@@ -228,8 +244,14 @@ SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags) {
 
 int SDL_Init(Uint32 flags) {
 
+    void * return_addr = __builtin_return_address(0);
+    fprintf(stdout, "Return addr: %p\n", return_addr);
+    
+    void * end_addr = dlsym(RTLD_DEFAULT, "_end");
+    fprintf(stdout, "End addr: %p\n", end_addr);
+    
 
-    if (!ismasking()) { return SDL_Init_original(flags); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_Init_original(flags); }
     debug("SDL_Init");
     m_main_thread = pthread_self();
     fprintf(stdout, "sizeof(NPEvent) = %u\n", (uint32_t)sizeof(NPEvent));
@@ -256,11 +278,11 @@ int SDL_Init(Uint32 flags) {
 
 static Uint32 ticks = 0;
 Uint32 SDL_GetTicks(void) {
-    if (!ismasking()) { return SDL_GetTicks_original(); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetTicks_original(); }
     fprintf(stdout, "ticks: %u", ticks);
     debug("SDL_GetTicks");
     FSYNC
-    return ticks++;
+    return (ticks += 100);
 }
 
 static void printEvent(SDL_Event *event) {
@@ -370,6 +392,7 @@ static void sendSync() {
 
 int SDL_PollEvent(SDL_Event *event) {
     debug("SDL_PollEvent");
+    FSYNC
     // Trek m_events leeg
     if(m_events.empty()) {
         sendSync();
@@ -411,25 +434,43 @@ int SDL_PollEvent(SDL_Event *event) {
 }
 
 int SDLCALL SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
-    if (!ismasking()) { return SDL_OpenAudio_original(desired, obtained); }
-    Unmask m;
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_OpenAudio_original(desired, obtained); }
     debug("SDL_OpenAudio");
     FSYNC
+    Unmask m;
     return SDL_OpenAudio_original(desired, obtained);
 }
 
 int SDL_Flip(SDL_Surface* screen) {
-    if (!ismasking()) { return SDL_Flip_original(screen); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_Flip_original(screen); }
     debug("SDL_Flip");
+    FSYNC
     receiveSync();
     Unmask m;
     return SDL_Flip_original(screen);
 }
 
 void SDL_GL_SwapBuffers(void) {
-    if (!ismasking()) { return SDL_GL_SwapBuffers_original(); }
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GL_SwapBuffers_original(); }
     debug("SDL_GL_SwapBuffers");
+    FSYNC
     receiveSync();
     Unmask m;
     SDL_GL_SwapBuffers_original();
+}
+/*
+void glBegin(GLenum mode) {
+    if (!ismasking() || CALLER_IS_LIBRARY) { return glBegin_original(mode); }
+    debug("glBegin");
+    FSYNC
+    glBegin_original(mode);
+}
+*/
+
+SDL_Thread * SDL_CreateThread(int (SDLCALL *fn)(void *), void *data) {
+    if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_CreateThread_original(fn, data); }
+    debug("SDL_CreateThread");
+    fprintf(stdout, "thread_func: %p ", fn);
+    FSYNC
+    return SDL_CreateThread_original(fn, data);
 }

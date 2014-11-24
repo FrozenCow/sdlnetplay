@@ -148,7 +148,6 @@ void netplay_connect() {
 
 
 void SyncChannel::read_packet(SyncPacket *packet) {
-    printf("FD:%d\n", fd);
     if(read_until(fd, &packet->framenumber, sizeof(packet->framenumber)) < 0) {
         die("Failed to read framenumber");
     }
