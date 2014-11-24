@@ -243,7 +243,6 @@ SDL_Surface *SDL_SetVideoMode(int width, int height, int bpp, Uint32 flags) {
 }
 
 int SDL_Init(Uint32 flags) {
-
     void * return_addr = __builtin_return_address(0);
     fprintf(stdout, "Return addr: %p\n", return_addr);
     
