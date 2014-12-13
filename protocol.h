@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <queue>
+#include <string>
 
 #include <stdint.h>
 #include <SDL/SDL.h>
@@ -39,9 +40,20 @@ typedef struct {
     std::vector<NPEvent> events;
 } SyncPacket;
 
-typedef struct {
-    char name[1024];
-} FSyncPacket;
+struct FSyncPacket {
+    std::vector<char> mName;
+    FSyncPacket() : mName() { }
+    FSyncPacket(const char *name) {
+        mName.resize(strlen(name)+1);
+        strcpy(&mName[0], name);
+    }
+    char *ptr() {
+        return &mName[0];
+    }
+    std::string str() {
+        return std::string(&mName[0]);
+    }
+};
 
 
 
@@ -102,12 +114,19 @@ void read_from_channel(Channel<T> * channel, T *packet) {
     }
 }
 
+extern void set_cork();
+extern void unset_cork();
+
 template<typename T>
 void write_to_channel(Channel<T> * channel, T & packet) {
+    set_cork();
+
     if(write_until(fd, &channel->id, sizeof(channel->id)) < 0) {
         die("Failed to write channel id");
     }
     channel->write_packet(packet);
+
+    unset_cork();
 }
 
 

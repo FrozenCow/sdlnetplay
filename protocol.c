@@ -148,7 +148,6 @@ void netplay_connect() {
 
 
 void SyncChannel::read_packet(SyncPacket *packet) {
-    printf("FD:%d\n", fd);
     if(read_until(fd, &packet->framenumber, sizeof(packet->framenumber)) < 0) {
         die("Failed to read framenumber");
     }
@@ -192,20 +191,19 @@ void FSyncChannel::read_packet(FSyncPacket *packet) {
     if (read_until(fd, &len, sizeof(len)) < 0) {
         die("Failed to read FSync packet len");
     }
-    if(read_until(fd, packet->name, (size_t)len) < 0) {
+    packet->mName.resize(len);
+    if(read_until(fd, packet->ptr(), (size_t)len) < 0) {
         die("Failed to read FSync packet name");
     }
+    
 }
 
 void FSyncChannel::write_packet(FSyncPacket &packet) {
-    uint32_t len = strlen(packet.name) + 1;
-    if (len > 1024) {
-        die("fsync function name too long (local)");
-    }
-    if (write_until(fd, &len, sizeof(uint32_t)) < 0) {
+    uint32_t len = packet.mName.size();
+    if (write_until(fd, &len, sizeof(len)) < 0) {
         die("Failed to write FSyncPacket");
     }
-    if (write_until(fd, packet.name, sizeof(char)*len) < 0) {
+    if (write_until(fd, packet.ptr(), sizeof(char)*len) < 0) {
         die("Failed to write FSyncPacket");
     }
 }
@@ -214,6 +212,18 @@ void FSyncChannel::read_and_queue_packet() {
     FSyncPacket msg;
     read_packet(&msg);
     pending.push(msg);
+}
+
+void set_cork() {
+    // Cork TCP
+    int state = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
+}
+
+void unset_cork() {
+    // Uncork TCP
+    int state = 0;
+    setsockopt(fd, IPPROTO_TCP, TCP_CORK, &state, sizeof(state));
 }
 
 }
