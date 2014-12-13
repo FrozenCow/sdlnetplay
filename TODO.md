@@ -3,7 +3,7 @@
 * Hotline Miami
 * Crayon Physics Deluxe
 * Case Story+
-> Braid
+* Braid
 * Aquaria
 * McPixel
 * Monaco

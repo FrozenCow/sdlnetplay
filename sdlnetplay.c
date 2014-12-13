@@ -363,7 +363,7 @@ int SDL_Init(Uint32 flags) {
 static Uint32 ticks = 0;
 Uint32 SDL_GetTicks(void) {
     if (!ismasking() || CALLER_IS_LIBRARY) { return SDL_GetTicks_original(); }
-    fprintf(stdout, "ticks: %u\n", ticks);
+    fprintf(stdout, "ticks: %u", ticks);
     debug("SDL_GetTicks");
     FSYNC
     return (ticks += 100);
