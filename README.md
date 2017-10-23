@@ -8,7 +8,9 @@ sdlnetplay sits between the game and SDL, OpenGL and the system. It does so by o
 
 It uses `LD_PRELOAD` to override the API functions.
 
-This project goes with a disclaimer that it is highly **experimental**. Most games will not work due to non-deteministic behavior that `sdlnetplay` cannot handle, usually caused by the game-logic relying on different threads.
+This project goes with a disclaimer that it is **highly experimental**. Most games will not work due to non-deteministic behavior that `sdlnetplay` cannot handle, usually caused by the game-logic relying on different threads. In addition, `sdlnetplay` currently has a nasty way to detect desyncs by storing screenshots to disk, hashing the file and send over and compare the hash of the other system.
+
+Also note that because most Linux games are compiled to 32-bit binaries, this library also compiles to 32-bit by default, otherwise it would be incompatible with the game and will not be able to preload.
 
 ## Games
 
@@ -30,6 +32,7 @@ Games that break down quickly:
 * OpenGL
 * SDL 1.2
 * libc6-dev-i386
+* imagemagick
 
 ## Building
 
