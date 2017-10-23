@@ -136,7 +136,9 @@ void screensync() {
         close(screenFile);
         
         debug("Converting to /tmp/screen.png");
-        system("convert -size 800x600 -depth 8 /tmp/screen.rgb /tmp/screen.png");
+        if (system("convert -size 800x600 -depth 8 /tmp/screen.rgb /tmp/screen.png") != 0) {
+            die("Could not convert /tmp/screen.rgb for desync detection");
+        }
         
         debug("Reading from /tmp/screen.png");
         struct stat stat_buf;
