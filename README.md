@@ -21,7 +21,7 @@ Games that have shown to work:
 Games that have issues:
 
 * Aquaria
-** Desyncs after audio dialogs, which runs on a separate thread
+  * Desyncs after audio dialogs, which runs on a separate thread
 
 Games that break down quickly:
 
